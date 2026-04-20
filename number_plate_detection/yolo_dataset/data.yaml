@@ -1,0 +1,6 @@
+path: C:\Users\Deep\Desktop\DAU_Projects\traffic\number_plate_detection\yolo_dataset
+train: C:\Users\Deep\Desktop\DAU_Projects\traffic\number_plate_detection\yolo_dataset\images\train
+val: C:\Users\Deep\Desktop\DAU_Projects\traffic\number_plate_detection\yolo_dataset\images\val
+nc: 1
+names:
+- licence_plate
