@@ -92,7 +92,7 @@ cd ..
 
 Make sure these model files are present:
 
-- Vehicle model: `yolo12l.pt`
+- Vehicle model: `yolo12l.pt` (make sure to upload it)
 - Helmet model: `best.pt`
 
 ## How To Run The Application
@@ -201,7 +201,7 @@ Red-Light-Violation-Detection/
 ├── browser_setup.py             # Browser-based red-light setup
 ├── bytetrack.yaml               # ByteTrack configuration
 ├── yolo12l.pt                   # Vehicle model
-├── best.pt      # Helmet model
+├── best.pt                      # Helmet model
 └── README.md
 ```
 
