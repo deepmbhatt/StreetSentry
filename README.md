@@ -2,7 +2,7 @@
 
 ## Repository Link
 
-Project repository: `https://github.com/HassanRasheed91/Red-Light-Violation-Detection`
+Project repository: `[https://github.com/deepmbhatt/StreetSentry](https://github.com/deepmbhatt/StreetSentry)`
 
 ## Objective And Application Description
 
