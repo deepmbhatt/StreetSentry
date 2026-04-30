@@ -93,7 +93,7 @@ cd ..
 Make sure these model files are present:
 
 - Vehicle model: `yolo12l.pt` (make sure to upload it)
-- Helmet model: `best.pt`
+- Helmet model: `runs_detect/runs/yolov8/helmet_v8s/weights/best.pt`
 
 ## How To Run The Application
 
