@@ -15,16 +15,19 @@ from ultralytics import YOLO
 
 from detector import (
     DEFAULT_HELMET_MODEL_WEIGHTS,
+    DEFAULT_SPEED_MODEL_WEIGHTS,
     DEFAULT_TRACKER_CFG,
     DEFAULT_VEHICLE_MODEL_WEIGHTS,
     HelmetProcessingOptions,
     ProcessingOptions,
+    SpeedLaneProcessingOptions,
     encode_frame_jpeg,
     extract_first_frame,
     load_config_file,
     make_browser_friendly_mp4,
     process_helmet_video,
     process_red_light_video,
+    process_speed_lane_video,
     read_video_metadata,
     save_config_file,
     validate_geometry,
@@ -38,11 +41,29 @@ APP_DATA_DIR = ROOT_DIR / "app_data"
 UPLOADS_DIR = APP_DATA_DIR / "uploads"
 CONFIGS_DIR = APP_DATA_DIR / "configs"
 RUNS_DIR = APP_DATA_DIR / "runs"
-WEIGHTS_PATH = ROOT_DIR / DEFAULT_VEHICLE_MODEL_WEIGHTS
-HELMET_WEIGHTS_PATH = ROOT_DIR / DEFAULT_HELMET_MODEL_WEIGHTS
+def resolve_existing_path(*relative_candidates: str) -> Path:
+    for candidate in relative_candidates:
+        path = ROOT_DIR / candidate
+        if path.exists():
+            return path
+    return ROOT_DIR / relative_candidates[0]
+
+
+WEIGHTS_PATH = resolve_existing_path(
+    DEFAULT_VEHICLE_MODEL_WEIGHTS,
+    f"backend/{DEFAULT_VEHICLE_MODEL_WEIGHTS}",
+)
+HELMET_WEIGHTS_PATH = resolve_existing_path(
+    DEFAULT_HELMET_MODEL_WEIGHTS,
+    f"backend/{DEFAULT_HELMET_MODEL_WEIGHTS}",
+)
 TRACKER_PATH = ROOT_DIR / DEFAULT_TRACKER_CFG
+SPEED_WEIGHTS_PATH = resolve_existing_path(
+    DEFAULT_SPEED_MODEL_WEIGHTS,
+    f"backend/{DEFAULT_SPEED_MODEL_WEIGHTS}",
+)
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv"}
-ProcessingModule = Literal["red_light", "helmet"]
+ProcessingModule = Literal["red_light", "helmet", "speed_lane"]
 
 
 class GeometryPayload(BaseModel):
@@ -60,6 +81,12 @@ class JobCreatePayload(BaseModel):
     helmet_conf: float = Field(0.35, ge=0.01, le=1.0)
     iou: float = Field(0.45, ge=0.01, le=1.0)
     traffic_light_refresh: int = Field(5, ge=1, le=120)
+    line1_ratio: float = Field(0.70, ge=0.1, le=0.99)
+    line2_ratio: float = Field(0.85, ge=0.1, le=0.99)
+    meters_between_lines: float = Field(8.0, gt=0.1, le=200.0)
+    speed_persist_frames: int = Field(150, ge=1, le=1000)
+    speed_limit_kmh: float = Field(50.0, ge=1.0, le=300.0)
+    violation_frame_threshold: int = Field(8, ge=1, le=240)
 
 
 jobs: dict[str, dict[str, Any]] = {}
@@ -67,6 +94,7 @@ jobs_lock = threading.Lock()
 model_lock = threading.Lock()
 cached_vehicle_model: YOLO | None = None
 cached_helmet_model: YOLO | None = None
+cached_speed_model: YOLO | None = None
 
 
 app = FastAPI(title="Red-Light Violation Detection API")
@@ -187,9 +215,26 @@ def get_helmet_model() -> YOLO:
     with model_lock:
         if cached_helmet_model is None:
             if not HELMET_WEIGHTS_PATH.exists():
-                raise RuntimeError(f"Helmet model weights not found: {HELMET_WEIGHTS_PATH}")
+                raise RuntimeError(
+                    f"Helmet model weights not found: {HELMET_WEIGHTS_PATH}. "
+                    "Provide trained helmet weights (with/without helmet classes) and try again."
+                )
             cached_helmet_model = YOLO(str(HELMET_WEIGHTS_PATH))
         return cached_helmet_model
+
+
+def get_speed_model() -> YOLO:
+    global cached_speed_model
+    with model_lock:
+        if cached_speed_model is None:
+            model_path = SPEED_WEIGHTS_PATH if SPEED_WEIGHTS_PATH.exists() else WEIGHTS_PATH
+            if not model_path.exists():
+                raise RuntimeError(
+                    "Speed model weights not found. Checked "
+                    f"{SPEED_WEIGHTS_PATH} and fallback {WEIGHTS_PATH}."
+                )
+            cached_speed_model = YOLO(str(model_path))
+        return cached_speed_model
 
 
 def persist_job(job: dict[str, Any]) -> None:
@@ -263,7 +308,12 @@ def output_path_for_public_job(job: dict[str, Any]) -> Path | None:
         return None
     run_dir = RUNS_DIR / Path(str(job_id)).name
     module = job.get("module")
-    preferred = "output_helmet_violations.mp4" if module == "helmet" else "output_red_light_violations.mp4"
+    if module == "helmet":
+        preferred = "output_helmet_violations.mp4"
+    elif module == "speed_lane":
+        preferred = "output_speed_lane_violations.mp4"
+    else:
+        preferred = "output_red_light_violations.mp4"
     preferred_path = run_dir / preferred
     if preferred_path.exists():
         return preferred_path
@@ -303,6 +353,26 @@ def run_job(job_id: str) -> None:
                 ),
                 vehicle_model=get_vehicle_model(),
                 helmet_model=get_helmet_model(),
+                progress_callback=on_progress,
+                verbose=False,
+            )
+        elif job["module"] == "speed_lane":
+            result = process_speed_lane_video(
+                video_in=job["video_path"],
+                video_out=job["output_path"],
+                weights=SPEED_WEIGHTS_PATH,
+                tracker=TRACKER_PATH,
+                options=SpeedLaneProcessingOptions(
+                    conf=job["options"]["conf"],
+                    iou=job["options"]["iou"],
+                    line1_ratio=job["options"]["line1_ratio"],
+                    line2_ratio=job["options"]["line2_ratio"],
+                    meters_between_lines=job["options"]["meters_between_lines"],
+                    speed_persist_frames=job["options"]["speed_persist_frames"],
+                    speed_limit_kmh=job["options"]["speed_limit_kmh"],
+                    violation_frame_threshold=job["options"]["violation_frame_threshold"],
+                ),
+                model=get_speed_model(),
                 progress_callback=on_progress,
                 verbose=False,
             )
@@ -438,7 +508,12 @@ def create_job(payload: JobCreatePayload) -> dict[str, Any]:
 
         job_id = uuid.uuid4().hex
         run_dir = RUNS_DIR / job_id
-        output_name = "output_helmet_violations.mp4" if payload.module == "helmet" else "output_red_light_violations.mp4"
+        if payload.module == "helmet":
+            output_name = "output_helmet_violations.mp4"
+        elif payload.module == "speed_lane":
+            output_name = "output_speed_lane_violations.mp4"
+        else:
+            output_name = "output_red_light_violations.mp4"
         output_path = run_dir / output_name
         job = {
             "id": job_id,
@@ -463,6 +538,12 @@ def create_job(payload: JobCreatePayload) -> dict[str, Any]:
                 "helmet_conf": payload.helmet_conf,
                 "iou": payload.iou,
                 "traffic_light_refresh": payload.traffic_light_refresh,
+                "line1_ratio": payload.line1_ratio,
+                "line2_ratio": payload.line2_ratio,
+                "meters_between_lines": payload.meters_between_lines,
+                "speed_persist_frames": payload.speed_persist_frames,
+                "speed_limit_kmh": payload.speed_limit_kmh,
+                "violation_frame_threshold": payload.violation_frame_threshold,
             },
         }
         jobs[job_id] = job

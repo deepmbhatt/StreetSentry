@@ -6,10 +6,11 @@ Project repository: `https://github.com/deepmbhatt/StreetSentry`
 
 ## Objective And Application Description
 
-This application is a traffic surveillance system for detecting two kinds of violations from road videos:
+This application is a traffic surveillance system for detecting three kinds of violations from road videos:
 
 1. `Red-light violation`
 2. `Helmet violation`
+3. `Speed + lane violation`
 
 The objective is to reduce manual video review by automatically processing traffic footage, identifying violations, generating annotated output videos, and saving structured results that can be reviewed later.
 
@@ -29,9 +30,17 @@ The system has a web interface built with `React + Vite` and a backend built wit
 - Marks a motorcycle as a violation when the rider is detected without a helmet.
 - Saves an annotated output video and a result record in `app_data/runs/`.
 
+### Speed + lane mode
+
+- Uses YOLO + ByteTrack tracking on road videos.
+- Computes speed between two horizontal reference lines (`70%` and `85%` of frame height by default).
+- Flags overspeed using `speed_limit_kmh` (default `50 km/h`).
+- Uses curved lane polygons and flags lane violations when a tracked vehicle stays outside its assigned lane for multiple frames.
+- Saves an annotated output video and a result record in `app_data/runs/`.
+
 ## Main Features
 
-- Two processing modes in one application: `Red Light` and `Helmet`
+- Three processing modes in one application: `Red Light`, `Helmet`, and `Speed + Lane`
 - Web-based video selection and upload
 - Mode-aware video organization:
   - `inputs/` for red-light videos
@@ -92,8 +101,11 @@ cd ..
 
 Make sure these model files are present:
 
-- Vehicle model: `yolo12l.pt` (make sure to upload it)
-- Helmet model: `best.pt`
+- Vehicle model: `yolo12l.pt`
+- Speed/lane model: `detection_track.pt` (falls back to `yolo12l.pt` if missing)
+- Helmet model: `best.pt` (must be a valid trained checkpoint, not a Git LFS pointer file)
+
+The backend resolves model files from both the project root and `backend/` when available.
 
 ## How To Run The Application
 
@@ -149,10 +161,22 @@ http://127.0.0.1:5173/
    - the violation count
    - the violation log with clickable timestamps
 
+### Speed + lane mode
+
+1. Select `Speed + Lane` in the top module selector.
+2. Choose a video from the sidebar (from `inputs/`).
+3. No manual line/ROI setup is required; lane polygons and speed lines are auto-configured.
+4. Click `Run`.
+5. After processing finishes, review:
+   - the annotated output video
+   - speed/lane violation count
+   - the violation log with clickable timestamps
+
 ### Upload behavior
 
 - If the app is in `Red Light` mode, uploaded videos are saved into `inputs/`.
 - If the app is in `Helmet` mode, uploaded videos are saved into `inputs_helmet/`.
+- If the app is in `Speed + Lane` mode, uploaded videos are saved into `inputs/`.
 - Upload progress is shown in the sidebar.
 - After upload completes, the uploaded video appears in the sidebar automatically.
 
@@ -179,10 +203,17 @@ The project also supports command-line execution.
 .venv/bin/python main.py path/to/video.mp4 --module helmet
 ```
 
+### Speed + lane mode
+
+```bash
+.venv/bin/python main.py path/to/video.mp4 --module speed_lane
+```
+
 ### Optional CLI arguments
 
 - `--weights` for the vehicle model path
 - `--helmet-weights` for the helmet model path
+- `--speed-weights` for speed/lane model path (if exposed in your CLI version)
 - `--conf`, `--vehicle-conf`, `--helmet-conf`, `--iou`
 - `--browser-setup` for browser-based setup
 - `--config` and `--save-config` for reusable red-light geometry
@@ -193,7 +224,7 @@ The project also supports command-line execution.
 Red-Light-Violation-Detection/
 ├── backend/                     # FastAPI backend
 ├── frontend/                    # React + Vite frontend
-├── inputs/                      # Red-light videos
+├── inputs/                      # Red-light and speed/lane videos
 ├── inputs_helmet/               # Helmet videos
 ├── app_data/runs/               # Saved run outputs and job.json files
 ├── detector.py                  # Core detection logic
@@ -201,6 +232,7 @@ Red-Light-Violation-Detection/
 ├── browser_setup.py             # Browser-based red-light setup
 ├── bytetrack.yaml               # ByteTrack configuration
 ├── yolo12l.pt                   # Vehicle model
+├── detection_track.pt           # Speed/lane model (optional if using vehicle fallback)
 ├── best.pt                      # Helmet model
 └── README.md
 ```

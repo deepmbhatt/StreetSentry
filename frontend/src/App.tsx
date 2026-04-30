@@ -27,7 +27,7 @@ type VideoItem = {
 
 type Point = { x: number; y: number };
 type Rect = [number, number, number, number];
-type ProcessingModule = "red_light" | "helmet";
+type ProcessingModule = "red_light" | "helmet" | "speed_lane";
 
 type ApiConfig = {
   line: number[] | null;
@@ -177,7 +177,17 @@ function videoMatchesModule(video: VideoItem, module: ProcessingModule) {
 }
 
 function videoReadyForModule(video: VideoItem, module: ProcessingModule) {
-  return module === "helmet" || video.has_config;
+  return module === "helmet" || module === "speed_lane" || video.has_config;
+}
+
+function runDisabledReason(selectedModule: ProcessingModule, selectedVideo: VideoItem | null, redLightReady: boolean) {
+  if (!selectedVideo) {
+    return "Select a video first.";
+  }
+  if (selectedModule === "red_light" && !redLightReady) {
+    return "For Red Light, draw one Line and at least one ROI, then click Run.";
+  }
+  return "";
 }
 
 function App() {
@@ -212,7 +222,10 @@ function App() {
 
   const frameUrl = selectedVideo ? apiUrl(`/api/videos/${encodeURIComponent(selectedVideo.id)}/frame`) : "";
   const redLightReady = line.length === 2 && rois.length > 0;
-  const canRun = Boolean(selectedVideo && !running && (selectedModule === "helmet" || redLightReady));
+  const canRun = Boolean(
+    selectedVideo && !running && (selectedModule === "helmet" || selectedModule === "speed_lane" || redLightReady)
+  );
+  const runHint = runDisabledReason(selectedModule, selectedVideo, redLightReady);
   const violationLabel = selectedModule === "helmet" ? "Helmet Violations" : "Violations";
   const displayJob = activeJob?.result ? activeJob : latestJob;
   const displayResult = displayJob?.result ?? null;
@@ -264,12 +277,12 @@ function App() {
       return;
     }
     setActiveJob(null);
-    if (selectedModule === "helmet") {
+    if (selectedModule === "helmet" || selectedModule === "speed_lane") {
       setLine([]);
       setRois([]);
       setDraft([]);
       setMode(null);
-      setStatus("Helmet video loaded");
+      setStatus(selectedModule === "helmet" ? "Helmet video loaded" : "Speed/Lane video loaded");
       return;
     }
     setStatus("Setup loaded");
@@ -357,7 +370,14 @@ function App() {
       try {
         const next = await requestJson<Job>(`/api/jobs/${activeJob.id}`);
         setActiveJob(next);
-        setStatus(next.status === "succeeded" ? "Processing complete" : "Processing");
+        if (next.status === "failed") {
+          setStatus("Processing failed");
+          if (next.error) {
+            setError(next.error);
+          }
+        } else {
+          setStatus(next.status === "succeeded" ? "Processing complete" : "Processing");
+        }
         if (next.status === "succeeded") {
           setLatestJob(next);
         }
@@ -464,11 +484,17 @@ function App() {
           module: selectedModule,
           video_id: selectedVideo.id,
           ...(payload ?? {}),
-          conf: 0.35,
+          conf: selectedModule === "speed_lane" ? 0.25 : 0.35,
           vehicle_conf: 0.35,
           helmet_conf: 0.35,
           iou: 0.45,
-          traffic_light_refresh: 5
+          traffic_light_refresh: 5,
+          line1_ratio: 0.7,
+          line2_ratio: 0.85,
+          meters_between_lines: 8.0,
+          speed_persist_frames: 150,
+          speed_limit_kmh: 50.0,
+          violation_frame_threshold: 8
         })
       });
       setActiveJob(job);
@@ -593,7 +619,11 @@ function App() {
             ))}
             {!visibleVideos.length && (
               <div className="empty-video-list">
-                {selectedModule === "helmet" ? "No helmet videos found" : "No red-light videos found"}
+                {selectedModule === "helmet"
+                  ? "No helmet videos found"
+                  : selectedModule === "speed_lane"
+                    ? "No speed/lane videos found"
+                    : "No red-light videos found"}
               </div>
             )}
           </div>
@@ -616,6 +646,20 @@ function App() {
                   title="Run helmet violation detection"
                 >
                   Helmet
+                </button>
+                <button
+                  className={selectedModule === "speed_lane" ? "active" : ""}
+                  onClick={() => {
+                    setSelectedModule("speed_lane");
+                    setMode(null);
+                    setDraft([]);
+                    setActiveJob(null);
+                    setLatestJob(null);
+                    setStatus("Speed/Lane module selected");
+                  }}
+                  title="Run speed estimation and lane violation detection"
+                >
+                  Speed + Lane
                 </button>
               </div>
               {selectedModule === "red_light" && (
@@ -649,6 +693,7 @@ function App() {
                 Run
               </button>
             </div>
+            {!canRun && runHint && <div className="error-banner">{runHint}</div>}
 
             <div className="canvas-shell">
               {selectedVideo ? (
@@ -662,12 +707,20 @@ function App() {
           <section className="status-panel">
             <div className="metric-grid">
               <div>
-                <span>{selectedModule === "helmet" ? "Module" : "Line"}</span>
-                <strong>{selectedModule === "helmet" ? "Helmet" : line.length === 2 ? "Ready" : "Missing"}</strong>
+                <span>{selectedModule === "helmet" ? "Module" : selectedModule === "speed_lane" ? "Speed Lines" : "Line"}</span>
+                <strong>
+                  {selectedModule === "helmet"
+                    ? "Helmet"
+                    : selectedModule === "speed_lane"
+                      ? "Auto"
+                      : line.length === 2
+                        ? "Ready"
+                        : "Missing"}
+                </strong>
               </div>
               <div>
-                <span>{selectedModule === "helmet" ? "Setup" : "ROIs"}</span>
-                <strong>{selectedModule === "helmet" ? "Auto" : rois.length}</strong>
+                <span>{selectedModule === "helmet" ? "Setup" : selectedModule === "speed_lane" ? "Lanes" : "ROIs"}</span>
+                <strong>{selectedModule === "helmet" || selectedModule === "speed_lane" ? "Auto" : rois.length}</strong>
               </div>
               <div>
                 <span>Frames</span>
@@ -699,7 +752,14 @@ function App() {
                 <video ref={resultVideoRef} key={resultVideoUrl} controls preload="metadata" src={resultVideoUrl} />
                 <div className="result-summary">
                   <span>{displayJob === latestJob ? "Last saved result" : "Current result"} · {displayJob.video_name}</span>
-                  <strong>{displayResult.total_violations} {displayResult.module === "helmet" ? "helmet violations" : "violations"}</strong>
+                  <strong>
+                    {displayResult.total_violations}{" "}
+                    {displayResult.module === "helmet"
+                      ? "helmet violations"
+                      : displayResult.module === "speed_lane"
+                        ? "speed/lane violations"
+                        : "violations"}
+                  </strong>
                   <small>{displayResult.elapsed_seconds.toFixed(1)}s processing time</small>
                   <a href={resultVideoUrl} target="_blank" rel="noreferrer">Open annotated video</a>
                   <div className="violation-list">
