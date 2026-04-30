@@ -2,7 +2,7 @@
 
 ## Repository Link
 
-Project repository: `[https://github.com/deepmbhatt/StreetSentry]`
+Project repository: `https://github.com/deepmbhatt/StreetSentry`
 
 ## Objective And Application Description
 
