@@ -54,7 +54,7 @@ The system has a web interface built with `React + Vite` and a backend built wit
 ### Clone the repository
 
 ```bash
-git clone https://github.com/HassanRasheed91/Red-Light-Violation-Detection.git
+git clone https://github.com/deepmbhatt/StreetSentry.git
 cd Red-Light-Violation-Detection
 ```
 
