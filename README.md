@@ -201,7 +201,7 @@ Red-Light-Violation-Detection/
 ├── browser_setup.py             # Browser-based red-light setup
 ├── bytetrack.yaml               # ByteTrack configuration
 ├── yolo12l.pt                   # Vehicle model
-├── best.pt                      # Helmet model
+├── runs_detect/runs/yolov8/helmet_v8s/weights/best.pt  # Helmet model
 └── README.md
 ```
 
