@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import shutil
 import threading
@@ -43,6 +44,7 @@ HELMET_WEIGHTS_PATH = ROOT_DIR / DEFAULT_HELMET_MODEL_WEIGHTS
 TRACKER_PATH = ROOT_DIR / DEFAULT_TRACKER_CFG
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv"}
 ProcessingModule = Literal["red_light", "helmet"]
+DEFAULT_ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 
 class GeometryPayload(BaseModel):
@@ -69,10 +71,20 @@ cached_vehicle_model: YOLO | None = None
 cached_helmet_model: YOLO | None = None
 
 
+def allowed_origins() -> list[str]:
+    extra = os.getenv("CORS_ALLOW_ORIGINS", "")
+    origins = list(DEFAULT_ALLOWED_ORIGINS)
+    for value in extra.split(","):
+        origin = value.strip()
+        if origin and origin not in origins:
+            origins.append(origin)
+    return origins
+
+
 app = FastAPI(title="Red-Light Violation Detection API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
